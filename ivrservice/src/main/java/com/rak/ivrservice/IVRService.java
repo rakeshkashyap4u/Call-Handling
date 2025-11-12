@@ -1,21 +1,19 @@
 package com.rak.ivrservice;
 
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.cloud.texttospeech.v1.*;
 import com.google.protobuf.ByteString;
+import org.springframework.http.*;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class IVRService {
@@ -23,100 +21,130 @@ public class IVRService {
     private final String baseUrl = "http://localhost:8088/ari";
     private final RestTemplate restTemplate = new RestTemplate();
     private final Path ttsDir = Path.of("D:/Asterisk/sounds/tts");
+    private final ObjectMapper mapper = new ObjectMapper();
 
-    // Cache: text+language → base file name
-    private final Map<String, String> ttsCache = new ConcurrentHashMap<>();
+    private JsonNode flow; // entire call flow JSON
+    private final Map<String, String> callState = new ConcurrentHashMap<>(); // channelId -> currentNodeId
 
     public IVRService() throws Exception {
         Files.createDirectories(ttsDir);
-        System.out.println("✅ TTS directory ready at: " + ttsDir);
+        loadFlow();
+        preGenerateTTS(flow); // optional: preload existing prompts
     }
 
-    public void onCallStart(String channelId) {
-        speak(channelId, "Welcome to our service. Press 1 for English, or 2 for Hindi.", "en-US");
+    private void loadFlow() throws Exception {
+        flow = mapper.readTree(new File("D:/STUDY/GIT/Call-Handling/basiccallflow.json"));
     }
 
-    public void onDtmf(String channelId, String digit) {
-        if ("1".equals(digit)) {
-            speak(channelId, "You selected English. Thank you for calling.", "en-US");
-        } else if ("2".equals(digit)) {
-            speak(channelId, "Aap ne Hindi bhasa chuna hai. Call karne ke liye dhanyawaad.", "hi-IN");
-        } else {
-            speak(channelId, "Invalid input, please try again.", "en-US");
+    /** Pre-generate TTS for all nodes recursively (optional) */
+    private void preGenerateTTS(JsonNode node) throws Exception {
+        if (node.has("prompt")) {
+            String prompt = node.get("prompt").asText();
+            String lang = node.has("language") ? node.get("language").asText() : "en-US";
+            generateTTSIfAbsent(prompt, lang);
+        }
+        if (node.has("next")) {
+            for (JsonNode nextNode : node.get("next")) {
+                preGenerateTTS(flow.get(nextNode.asText()));
+            }
         }
     }
 
-    private void speak(String channelId, String text, String languageCode) {
+    /** Handle new call start */
+    public void onCallStart(String channelId) {
+        callState.put(channelId, "start");
+        playCurrentPrompt(channelId);
+    }
+
+    /** Handle DTMF dynamically */
+    public void onDtmf(String channelId, String digit) {
+        String currentNodeId = callState.get(channelId);
+        if (currentNodeId == null) return;
+
+        JsonNode currentNode = flow.get(currentNodeId);
+
+        if (currentNode.has("next") && currentNode.get("next").has(digit)) {
+            String nextNodeId = currentNode.get("next").get(digit).asText();
+            callState.put(channelId, nextNodeId);
+            playCurrentPrompt(channelId);
+        } else {
+            System.out.println("❌ Invalid input: " + digit);
+            playPrompt(channelId, "Invalid input, please try again.", "en-US");
+        }
+    }
+
+    /** Play prompt for current node */
+    private void playCurrentPrompt(String channelId) {
+        String currentNodeId = callState.get(channelId);
+        JsonNode node = flow.get(currentNodeId);
+        String text = node.get("prompt").asText();
+        String lang = node.has("language") ? node.get("language").asText() : "en-US";
+
         try {
-            // 1️⃣ Check if TTS already exists in cache
-            String cacheKey = languageCode + ":" + text;
-            String baseName = ttsCache.get(cacheKey);
+            // Dynamically generate TTS if missing
+            generateTTSIfAbsent(text, lang);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
 
-            Path wavPath;
-            Path ulawPath;
+        playPrompt(channelId, text, lang);
+    }
 
-            if (baseName != null) {
-                // Use cached file
-                wavPath = ttsDir.resolve(baseName + ".wav");
-                ulawPath = ttsDir.resolve(baseName + ".ulaw");
+    /** Play audio via ARI */
+    private void playPrompt(String channelId, String text, String languageCode) {
+        try {
+            String baseName = "tts_" + text.hashCode() + "_" + languageCode;
+            String mediaPath = "sound:tts/" + baseName;
 
-                if (!Files.exists(ulawPath)) {
-                    // Regenerate .ulaw if missing
-                    convertWavToUlaw(wavPath, ulawPath);
-                }
-            } else {
-                // 2️⃣ Generate new TTS
-                baseName = "tts_" + System.currentTimeMillis();
-                wavPath = ttsDir.resolve(baseName + ".wav");
-                ulawPath = ttsDir.resolve(baseName + ".ulaw");
-
-                synthesizeTextToFile(text, wavPath.toString(), languageCode);
-                convertWavToUlaw(wavPath, ulawPath);
-
-                // Save to cache
-                ttsCache.put(cacheKey, baseName);
-            }
-
-            // 3️⃣ Play via ARI
             HttpHeaders headers = new HttpHeaders();
             headers.setBasicAuth("myariuser", "myaripass");
             HttpEntity<String> request = new HttpEntity<>(headers);
 
-            String mediaPath = "sound:tts/" + baseName;
             String playUrl = baseUrl + "/channels/" + channelId + "/play?media=" + mediaPath;
+            restTemplate.exchange(playUrl, HttpMethod.POST, request, String.class);
 
-            ResponseEntity<String> response = restTemplate.exchange(playUrl, HttpMethod.POST, request, String.class);
-            System.out.println("📢 Playing audio: " + mediaPath + " | Response: " + response.getStatusCode());
+            System.out.println("📢 Playing audio: " + mediaPath + " | Channel: " + channelId);
 
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private void convertWavToUlaw(Path wavPath, Path ulawPath) throws Exception {
-        ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-y", "-i", wavPath.toString(),
-                "-ar", "8000", "-ac", "1", "-f", "mulaw", ulawPath.toString());
+    /** Generate TTS only if missing */
+    private void generateTTSIfAbsent(String text, String languageCode) throws Exception {
+        String baseName = "tts_" + text.hashCode() + "_" + languageCode;
+        Path ulawPath = ttsDir.resolve(baseName + ".ulaw");
+
+        if (Files.exists(ulawPath)) return; // Already exists
+
+        Path wavPath = ttsDir.resolve(baseName + ".wav");
+        synthesizeTextToFile(text, wavPath.toString(), languageCode);
+
+        // Convert WAV → ULAW
+        ProcessBuilder pb = new ProcessBuilder(
+                "ffmpeg", "-y", "-i", wavPath.toString(),
+                "-ar", "8000", "-ac", "1", "-f", "mulaw", ulawPath.toString()
+        );
         pb.inheritIO().start().waitFor();
-        System.out.println("🎵 Converted WAV to ULAW: " + ulawPath);
+
+        System.out.println("🎵 TTS generated dynamically: " + ulawPath);
     }
 
+    /** Call Google TTS */
     private void synthesizeTextToFile(String text, String filePath, String languageCode) throws Exception {
-        try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create()) {
+        try (TextToSpeechClient client = TextToSpeechClient.create()) {
             SynthesisInput input = SynthesisInput.newBuilder().setText(text).build();
             VoiceSelectionParams voice = VoiceSelectionParams.newBuilder()
                     .setLanguageCode(languageCode)
                     .setSsmlGender(SsmlVoiceGender.NEUTRAL)
                     .build();
             AudioConfig audioConfig = AudioConfig.newBuilder()
-                    .setAudioEncoding(AudioEncoding.LINEAR16) // WAV
+                    .setAudioEncoding(AudioEncoding.LINEAR16)
                     .build();
-
-            SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
+            SynthesizeSpeechResponse response = client.synthesizeSpeech(input, voice, audioConfig);
             ByteString audioContents = response.getAudioContent();
-
             try (FileOutputStream out = new FileOutputStream(filePath)) {
                 out.write(audioContents.toByteArray());
-                System.out.println("✅ TTS audio saved at: " + filePath);
             }
         }
     }

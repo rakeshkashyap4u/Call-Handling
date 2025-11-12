@@ -1,0 +1,42 @@
+{
+  "start": {
+    "prompt": "Welcome to our NEWS IVR service. Press 1 for English, 2 for Hindi.",
+    "language": "en-US",
+    "next": {
+      "1": "englishNode",
+      "2": "hindiNode"
+    }
+  },
+  "englishNode": {
+    "prompt": "You selected English. Press 1 for Local News ,Press 2 for International News",
+    "language": "en-US",
+    "next": {
+      "1": "localNewsNodeE",
+      "2": "internationalNewsNodeE"
+    }
+  },
+  "hindiNode": {
+    "prompt": "Aap ne Hindi bhasa chuna hai. Local News ke liye Ek Dabaye , Internation News ke liye DO Dabaye",
+    "language": "hi-IN",
+     "next": {
+      "1": "localNewsNodeH",
+      "2": "internationalNewsNodeH"
+    }
+  },
+  "localNewsNodeE": {
+    "prompt": "You have selected  Local News Service, Thankyou for calling",
+    "language": "en-US"
+    },
+  "internationalNewsNodeE": {
+    "prompt": "You  Have selected  International News Service, Thankyou for calling",
+    "language": "en-US"
+    },
+     "localNewsNodeH": {
+    "prompt": "Local News Service Chuna hai apne  , Call karne ke liye Dhanywaad",
+    "language": "hi-IN"
+    },
+  "internationalNewsNodeH": {
+    "prompt": "International News Service Chuna hai apne  , Call karne ke liye Dhanywaad",
+    "language": "hi-IN"
+    }
+}
