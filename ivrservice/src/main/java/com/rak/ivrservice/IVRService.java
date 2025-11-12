@@ -17,83 +17,77 @@ import java.nio.file.Path;
 @Service
 public class IVRService {
 
-    private final String baseUrl = "http://localhost:8088/ari";
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final Path ttsDir = Path.of("D:/Asterisk/sounds/tts");
+	private final String baseUrl = "http://localhost:8088/ari";
+	private final RestTemplate restTemplate = new RestTemplate();
+	private final Path ttsDir = Path.of("D:/Asterisk/sounds/tts");
 
-    public IVRService() throws Exception {
-        // Ensure directory exists
-        Files.createDirectories(ttsDir);
-        System.out.println("✅ TTS directory ready at: " + ttsDir);
-    }
+	public IVRService() throws Exception {
+		Files.createDirectories(ttsDir);
+		//System.out.println("✅ TTS directory ready at: " + ttsDir);
+	}
 
-    public void onCallStart(String channelId) {
-        speak(channelId, "Welcome to our service. Press 1 for Hindi, or 2 for English.");
-    }
+	public void onCallStart(String channelId) {
+		speak(channelId, "Welcome to our service. Press 1 for English, or 2 for Hindi.", "en-US");
+	}
 
-    public void onDtmf(String channelId, String digit) {
-        if ("1".equals(digit)) {
-            speak(channelId, "You selected Hindi.");
-        } else if ("2".equals(digit)) {
-            speak(channelId, "You selected English.");
-        } else {
-            speak(channelId, "Invalid input, please try again.");
-        }
-    }
+	public void onDtmf(String channelId, String digit) {
+		if ("1".equals(digit)) {
+			speak(channelId, "You selected English.Thankyou for calling", "en-US");
+		} else if ("2".equals(digit)) {
+			speak(channelId, "Apne Hindi bhasa chuna hai. Call karne ke liye dhanyawaad", "hi-IN");
+		} else {
+			speak(channelId, "Invalid input, please try again.", "en-US");
+		}
+	}
 
-    private void speak(String channelId, String text) {
-        try {
-            // 1️⃣ Generate a WAV file from Google TTS
-            String baseName = "tts_" + System.currentTimeMillis();
-            Path wavPath = ttsDir.resolve(baseName + ".wav");
-            Path ulawPath = ttsDir.resolve(baseName + ".ulaw");
+	private void speak(String channelId, String text, String languageCode) {
+		try {
+			// Generate TTS WAV file
+			String baseName = "tts_" + System.currentTimeMillis();
+			Path wavPath = ttsDir.resolve(baseName + ".wav");
+			Path ulawPath = ttsDir.resolve(baseName + ".ulaw");
 
-            synthesizeTextToFile(text, wavPath.toString());
+			synthesizeTextToFile(text, wavPath.toString(), languageCode);
 
-            // 2️⃣ Convert WAV → ULAW (8kHz, mono) using ffmpeg
-            ProcessBuilder pb = new ProcessBuilder(
-                    "ffmpeg", "-y", "-i", wavPath.toString(),
-                    "-ar", "8000", "-ac", "1", "-f", "mulaw", ulawPath.toString()
-            );
-            pb.inheritIO().start().waitFor();
-            System.out.println("🎵 Converted WAV to ULAW: " + ulawPath);
+			// Convert WAV → ULAW (8kHz, mono) for Asterisk
+			ProcessBuilder pb = new ProcessBuilder("ffmpeg", "-y", "-i", wavPath.toString(), "-ar", "8000", "-ac", "1",
+					"-f", "mulaw", ulawPath.toString());
+			pb.inheritIO().start().waitFor();
+		//	System.out.println("🎵 Converted WAV to ULAW: " + ulawPath);
 
-            // 3️⃣ Build HTTP headers with ARI credentials
-            HttpHeaders headers = new HttpHeaders();
-            headers.setBasicAuth("myariuser", "myaripass");
-            HttpEntity<String> request = new HttpEntity<>(headers);
+			// Play file via ARI
+			HttpHeaders headers = new HttpHeaders();
+			headers.setBasicAuth("myariuser", "myaripass");
+			HttpEntity<String> request = new HttpEntity<>(headers);
 
-            // 4️⃣ Tell Asterisk to play the sound file
-            String mediaPath = "sound:tts/" + baseName;
-            String playUrl = baseUrl + "/channels/" + channelId + "/play?media=" + mediaPath;
+			String mediaPath = "sound:tts/" + baseName;
+			String playUrl = baseUrl + "/channels/" + channelId + "/play?media=" + mediaPath;
 
-            ResponseEntity<String> response = restTemplate.exchange(playUrl, HttpMethod.POST, request, String.class);
-            System.out.println("📢 Playing audio: " + mediaPath + " | Response: " + response.getStatusCode());
+			ResponseEntity<String> response = restTemplate.exchange(playUrl, HttpMethod.POST, request, String.class);
+			System.out.println("📢 Playing audio: " + mediaPath + " | Response: " + response.getStatusCode());
 
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
 
-    private void synthesizeTextToFile(String text, String filePath) throws Exception {
-        try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create()) {
-            SynthesisInput input = SynthesisInput.newBuilder().setText(text).build();
-            VoiceSelectionParams voice = VoiceSelectionParams.newBuilder()
-                    .setLanguageCode("en-US")
-                    .setSsmlGender(SsmlVoiceGender.NEUTRAL)
-                    .build();
+	private void synthesizeTextToFile(String text, String filePath, String languageCode) throws Exception {
+		try (TextToSpeechClient textToSpeechClient = TextToSpeechClient.create()) {
+			SynthesisInput input = SynthesisInput.newBuilder().setText(text).build();
 
-            AudioConfig audioConfig = AudioConfig.newBuilder()
-                    .setAudioEncoding(AudioEncoding.LINEAR16) // WAV output
-                    .build();
+			VoiceSelectionParams voice = VoiceSelectionParams.newBuilder().setLanguageCode(languageCode)
+					.setSsmlGender(SsmlVoiceGender.NEUTRAL).build();
 
-            SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
-            ByteString audioContents = response.getAudioContent();
+			AudioConfig audioConfig = AudioConfig.newBuilder().setAudioEncoding(AudioEncoding.LINEAR16) // WAV
+					.build();
 
-            try (FileOutputStream out = new FileOutputStream(filePath)) {
-                out.write(audioContents.toByteArray());
-                System.out.println("✅ TTS audio saved at: " + filePath);
-            }
-        }
-    }
+			SynthesizeSpeechResponse response = textToSpeechClient.synthesizeSpeech(input, voice, audioConfig);
+			ByteString audioContents = response.getAudioContent();
+
+			try (FileOutputStream out = new FileOutputStream(filePath)) {
+				out.write(audioContents.toByteArray());
+				System.out.println("✅ TTS audio saved at: " + filePath);
+			}
+		}
+	}
 }
