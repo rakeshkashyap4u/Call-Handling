@@ -1,4 +1,5 @@
 1. docker build -t my-asterisk:22 .
+(same palce where DockerFile will be there)
 
 2. 
 docker run -d --name asterisk2 -p 5060:5060/udp -p 5060:5060/tcp -p 8088:8088 -p 10000-10100:10000-10100/udp -v /d/STUDY/GIT/Call-Handling/asterisk-config:/etc/asterisk -v "D:\Asterisk\sounds:/var/lib/asterisk/sounds" my-asterisk:22
@@ -10,3 +11,16 @@ docker exec -it asterisk2 bash
 
 to install nano 
 apt update && apt install nano -y
+
+
+
+
+
+copy ffmpeg folder in any drive and set path variable in envrionement variable
+
+make folder D:\Asterisk\sounds\tts
+
+in spring boot run as cobfiguration and add envrionement
+this  D:\Asterisk\sounds\tts
+
+https://www.microsip.org/downloads
