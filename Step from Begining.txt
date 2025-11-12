@@ -1,0 +1,4 @@
+1. docker build -t my-asterisk:22 .
+
+2. docker run -d --name asterisk2 -p 5060:5060/udp -p 5060:5060/tcp -v D:\STUDY\GIT\asterisk-config:/etc/asterisk my-asterisk:22
+
