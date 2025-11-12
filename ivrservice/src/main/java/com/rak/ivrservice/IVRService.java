@@ -19,7 +19,7 @@ public class IVRService {
 
     private final String baseUrl = "http://localhost:8088/ari";
     private final RestTemplate restTemplate = new RestTemplate();
-    private final Path ttsDir = Path.of("/var/lib/asterisk/sounds/tts");
+    private final Path ttsDir = Path.of("D:/Asterisk/sounds/tts");
 
     public IVRService() throws Exception {
         // Ensure directory exists

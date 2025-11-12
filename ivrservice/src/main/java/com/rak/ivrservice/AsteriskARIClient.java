@@ -14,7 +14,8 @@ import okhttp3.WebSocketListener;
 import com.fasterxml.jackson.databind.ObjectMapper;
 @Service
 public class AsteriskARIClient {
-    private static final String ARI_URL = "ws://localhost:8088/ari/events?api_key=myariuser:myaripass&app=myivr";
+	private static final String ARI_URL = "ws://localhost:8088/ari/events?api_key=myariuser:myaripass&app=myivr";
+
     private final OkHttpClient client = new OkHttpClient();
     
     private final ObjectMapper mapper = new ObjectMapper();
